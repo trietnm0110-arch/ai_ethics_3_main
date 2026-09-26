@@ -26,7 +26,7 @@ export default {
     if (req.method !== 'POST') return Response.json({ error: 'Method not allowed' }, { status: 405 });
 
     try {
-      const body = await req.json() as { sessionId?: unknown; message?: unknown };
+      const body = await req.json() as { sessionId?: unknown; message?: unknown; messages?: unknown };
       if (!validSessionId(body.sessionId) || typeof body.message !== 'string') {
         return Response.json({ error: 'Dữ liệu trò chuyện không hợp lệ.' }, { status: 400 });
       }
@@ -35,24 +35,52 @@ export default {
       if (!content) return Response.json({ error: 'Tin nhắn đang trống.' }, { status: 400 });
 
       const topic = classifyTopic(content);
-      const history = await db.select({ role: chatMessages.role, content: chatMessages.content })
-        .from(chatMessages)
-        .where(eq(chatMessages.sessionId, body.sessionId))
-        .orderBy(desc(chatMessages.createdAt))
-        .limit(23);
+      const suppliedHistory = Array.isArray(body.messages)
+        ? body.messages.slice(-23).flatMap((item): Array<{ role: 'user' | 'model'; content: string }> => {
+          if (!item || typeof item !== 'object') return [];
+          const message = item as { role?: unknown; content?: unknown };
+          if ((message.role !== 'user' && message.role !== 'model') || typeof message.content !== 'string') return [];
+          return [{ role: message.role, content: message.content.slice(0, 4000) }];
+        })
+        : [];
+      if (suppliedHistory.at(-1)?.role === 'user' && suppliedHistory.at(-1)?.content === content) suppliedHistory.pop();
 
-      const recentHistory = history.reverse();
-      const reply = await handleChatWithGemini([...recentHistory, { role: 'user', content }].map((item) => ({
-        role: item.role === 'assistant' ? 'model' : 'user',
-        content: item.content,
-      })));
-      await db.insert(chatMessages).values({ sessionId: body.sessionId, role: 'user', content, topic });
-      await db.insert(chatMessages).values({ sessionId: body.sessionId, role: 'assistant', content: reply, topic });
+      let conversation = [...suppliedHistory, { role: 'user' as const, content }].slice(-24);
+      if (db) {
+        try {
+          const history = await db.select({ role: chatMessages.role, content: chatMessages.content })
+            .from(chatMessages)
+            .where(eq(chatMessages.sessionId, body.sessionId))
+            .orderBy(desc(chatMessages.createdAt))
+            .limit(23);
+          conversation = [...history.reverse(), { role: 'user', content }].map((item) => ({
+            role: item.role === 'assistant' ? 'model' : 'user',
+            content: item.content,
+          }));
+        } catch (error) {
+          console.error('Chat history lookup failed', error instanceof Error ? error.name : 'Unknown error');
+        }
+      }
+
+      const reply = await handleChatWithGemini(conversation);
+      if (db) {
+        try {
+          await db.insert(chatMessages).values({ sessionId: body.sessionId, role: 'user', content, topic });
+          await db.insert(chatMessages).values({ sessionId: body.sessionId, role: 'assistant', content: reply, topic });
+        } catch (error) {
+          console.error('Chat history save failed', error instanceof Error ? error.name : 'Unknown error');
+        }
+      }
 
       return Response.json({ reply, topic });
     } catch (error) {
       console.error('AI ethics chat failed', error instanceof Error ? error.name : 'Unknown error');
-      return Response.json({ error: 'Trợ lý đang tạm gián đoạn. Vui lòng thử lại sau.' }, { status: 500 });
+      const missingApiKey = error instanceof Error && error.message === 'GEMINI_API_KEY is not configured';
+      return Response.json({
+        error: missingApiKey
+          ? 'Máy chủ chưa cấu hình GEMINI_API_KEY.'
+          : 'Trợ lý đang tạm gián đoạn. Vui lòng thử lại sau.',
+      }, { status: missingApiKey ? 503 : 500 });
     }
   },
 };

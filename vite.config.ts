@@ -31,9 +31,12 @@ function geminiApiPlugin(): Plugin {
               res.end(JSON.stringify({ reply }));
             } catch (err: unknown) {
               console.error('API error in Vite middleware:', err instanceof Error ? err.name : 'Unknown error');
-              res.statusCode = 500;
+              const missingApiKey = err instanceof Error && err.message === 'GEMINI_API_KEY is not configured';
+              res.statusCode = missingApiKey ? 503 : 500;
               res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ error: 'Internal Server Error' }));
+              res.end(JSON.stringify({ error: missingApiKey
+                ? 'Thiếu GEMINI_API_KEY. Thêm khóa vào file .env rồi khởi động lại dev server.'
+                : 'Gemini đang tạm gián đoạn. Vui lòng thử lại sau.' }));
             }
           });
           return;

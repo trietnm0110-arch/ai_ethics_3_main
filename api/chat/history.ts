@@ -7,12 +7,18 @@ export default {
     if (req.method !== 'GET') return Response.json({ error: 'Method not allowed' }, { status: 405 });
     const sessionId = new URL(req.url).searchParams.get('sessionId');
     if (!sessionId || !/^[0-9a-f-]{36}$/i.test(sessionId)) return Response.json({ messages: [] });
+    if (!db) return Response.json({ messages: [] });
 
-    const messages = await db.select({ id: chatMessages.id, role: chatMessages.role, content: chatMessages.content, topic: chatMessages.topic, createdAt: chatMessages.createdAt })
-      .from(chatMessages)
-      .where(eq(chatMessages.sessionId, sessionId))
-      .orderBy(asc(chatMessages.createdAt))
-      .limit(80);
-    return Response.json({ messages });
+    try {
+      const messages = await db.select({ id: chatMessages.id, role: chatMessages.role, content: chatMessages.content, topic: chatMessages.topic, createdAt: chatMessages.createdAt })
+        .from(chatMessages)
+        .where(eq(chatMessages.sessionId, sessionId))
+        .orderBy(asc(chatMessages.createdAt))
+        .limit(80);
+      return Response.json({ messages });
+    } catch (error) {
+      console.error('Chat history lookup failed', error instanceof Error ? error.name : 'Unknown error');
+      return Response.json({ messages: [] });
+    }
   },
 };

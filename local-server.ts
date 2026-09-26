@@ -24,7 +24,12 @@ app.post('/api/chat', async (req, res) => {
     return res.json({ reply });
   } catch (error: unknown) {
     console.error('Server chat error:', error instanceof Error ? error.name : 'Unknown error');
-    return res.status(500).json({ error: 'Internal server error' });
+    const missingApiKey = error instanceof Error && error.message === 'GEMINI_API_KEY is not configured';
+    return res.status(missingApiKey ? 503 : 500).json({
+      error: missingApiKey
+        ? 'Máy chủ chưa cấu hình GEMINI_API_KEY.'
+        : 'Trợ lý đang tạm gián đoạn. Vui lòng thử lại sau.',
+    });
   }
 });
 

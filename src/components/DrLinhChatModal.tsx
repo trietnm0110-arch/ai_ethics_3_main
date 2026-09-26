@@ -65,11 +65,13 @@ export const DrLinhChatModal: React.FC<Props> = ({ isOpen, onClose, currentScena
         content: message.content,
       }));
       const response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sessionId(), message: content, messages: conversation }) });
-      const data = await response.json();
-      if (!response.ok || typeof data.reply !== 'string') throw new Error();
+      const data = await response.json().catch(() => ({})) as { reply?: unknown; error?: unknown; topic?: string };
+      if (!response.ok || typeof data.reply !== 'string') {
+        throw new Error(typeof data.error === 'string' ? data.error : 'Không thể nhận được câu trả lời. Vui lòng thử lại.');
+      }
       setMessages(old => [...old, { role: 'assistant', content: data.reply, topic: data.topic, createdAt: new Date().toISOString() }]);
-    } catch {
-      setError('Không thể nhận được câu trả lời. Vui lòng thử lại.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Không thể nhận được câu trả lời. Vui lòng thử lại.');
       setFailedMessage(content);
     }
     finally { setLoading(false); }
